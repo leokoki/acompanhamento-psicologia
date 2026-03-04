@@ -313,12 +313,12 @@ def tela_edicao():
             sexo = st.selectbox(
                 "Sexo*",
                 ["M", "F"],
-                index=0 if registro.get("sexo", "M") == "M" else 1,
+                index=0 if registro.get("sexo", "F") == "F" else 1,
             )
             fechou = st.selectbox(
                 "Fechou*",
                 ["Sim", "Não"],
-                index=0 if registro.get("fechou", "Não") == "Sim" else 1,
+                index=0 if registro.get("fechou", "Não") == "Não" else 1,
             )
 
         with col2:
