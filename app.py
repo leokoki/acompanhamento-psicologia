@@ -58,8 +58,9 @@ def tela_login():
     if "auth_role" not in st.session_state:
         st.session_state.auth_role = None
 
-    senha = st.text_input("Digite a senha", type="password")
-    entrar = st.button("Entrar")
+    with st.form("login_form"):
+        senha = st.text_input("Digite a senha", type="password")
+        entrar = st.form_submit_button("Entrar")
 
     if entrar:
         senha_admin = st.secrets["app"]["password"]
