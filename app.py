@@ -214,8 +214,8 @@ def tela_cadastro():
 
         with col1:
             ddd = st.text_input("DDD*", max_chars=3)
-            sexo = st.selectbox("Sexo*", ["M", "F"])
-            fechou = st.selectbox("Fechou*", ["Sim", "Não"])
+            sexo = st.selectbox("Sexo*", ["M", "F"], index=1)
+            fechou = st.selectbox("Fechou*", ["Sim", "Não"], index=1)
 
         with col2:
             numero = st.text_input("Número (opcional)", help="Somente o número, sem DDD.")
@@ -313,12 +313,12 @@ def tela_edicao():
             ddd = st.text_input("DDD*", value=str(registro.get("ddd", "")), max_chars=3)
             sexo = st.selectbox(
                 "Sexo*",
-                ["M", "F"],
+                ["F", "M"],
                 index=0 if registro.get("sexo", "F") == "F" else 1,
             )
             fechou = st.selectbox(
                 "Fechou*",
-                ["Sim", "Não"],
+                ["Não", "Sim"],
                 index=0 if registro.get("fechou", "Não") == "Não" else 1,
             )
 
