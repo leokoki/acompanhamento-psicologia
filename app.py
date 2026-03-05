@@ -221,7 +221,7 @@ def tela_cadastro():
             numero = st.text_input("Número (opcional)", help="Somente o número, sem DDD.")
             motivo = st.selectbox(
                 "Motivo*",
-                ["Aguardando", "Não retornou", "Preço"],
+                ["Aguardando", "Não retornou", "Preço", "Público Errado", "Convênio"],
             )
 
         today = datetime.today().date()
@@ -328,7 +328,7 @@ def tela_edicao():
                 value=str(registro.get("numero", "")) if pd.notna(registro.get("numero", "")) else "",
             )
             motivo_atual = motivo_original
-            motivos = ["Aguardando", "Não retornou", "Preço"]
+            motivos = ["Aguardando", "Não retornou", "Preço", "Público Errado", "Convênio"]
             motivo_index = motivos.index(motivo_atual) if motivo_atual in motivos else 0
             motivo = st.selectbox("Motivo*", motivos, index=motivo_index)
 
