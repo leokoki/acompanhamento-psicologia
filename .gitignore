@@ -10,4 +10,7 @@ venv/
 
 # Streamlit
 .streamlit/secrets.toml
+.devcontainer/
 
+# Excel
+src/*.xlsx

@@ -4,6 +4,11 @@ from datetime import datetime
 
 import database as db
 
+try:
+    import altair as alt
+except ImportError:
+    alt = None
+
 
 # Mapeamento de DDD para estado (UF) usado para preencher o campo de estado automaticamente
 DDD_TO_ESTADO = {
@@ -82,10 +87,9 @@ def tela_login():
         st.stop()
 
 
-# Tela 1: dashboards com visão semanal, mensal e gráfico de contatos por estado
+# Tela 1: dashboards alinhados ao notebook de análise (público + motivos + semanal/mensal)
 def tela_dashboards():
     st.title("Acompanhamento de Contatos - Psicologia")
-    st.subheader("Visão Geral")
 
     leads_df = db.get_whatsapp_leads()
 
@@ -93,116 +97,264 @@ def tela_dashboards():
         st.info("Ainda não há registros de contatos.")
         return
 
-    # Garantir tipos de data
+    # Coluna de data no formato YYYY-mm-dd (ex.: do Google Sheets)
     if "data_contato" in leads_df.columns:
-        leads_df["data_contato"] = pd.to_datetime(leads_df["data_contato"], errors="coerce")
+        leads_df["data_contato"] = pd.to_datetime(
+            leads_df["data_contato"], format="%Y-%m-%d", errors="coerce"
+        )
 
-    col1, col2, col3 = st.columns(3)
-
+    # Janelas de tempo (alinhado ao notebook: semana = últimos 7 dias, mês = desde dia 1)
     hoje = pd.Timestamp.today().normalize()
-    inicio_semana = hoje - pd.to_timedelta(hoje.weekday(), unit="D")
+    inicio_semana = hoje - pd.Timedelta(days=6)
     inicio_mes = hoje.replace(day=1)
+    leads_df["_data_norm"] = leads_df["data_contato"].dt.normalize()
+    contatos_semana = leads_df[leads_df["_data_norm"] >= inicio_semana]
+    contatos_mes = leads_df[leads_df["_data_norm"] >= inicio_mes]
 
-    contatos_semana = leads_df[leads_df["data_contato"] >= inicio_semana]
-    contatos_mes = leads_df[leads_df["data_contato"] >= inicio_mes]
-
+    # ---------- Visão geral (métricas) ----------
+    st.subheader("Visão geral")
+    col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("Contatos na semana", len(contatos_semana))
+        st.metric("Contatos na semana (últimos 7 dias)", len(contatos_semana))
     with col2:
         st.metric("Contatos no mês", len(contatos_mes))
     with col3:
         st.metric("Total de contatos", len(leads_df))
 
+    # ---------- 1. Entender o público que está chegando ----------
     st.markdown("---")
-    st.subheader("Distribuição por Estado (a partir do DDD)")
+    st.subheader("1. Público que está chegando")
 
+    st.caption("Contatos por Estado (origem do público)")
     if "estado" in leads_df.columns and not leads_df["estado"].isna().all():
         estado_counts = (
             leads_df[leads_df["estado"].notna() & (leads_df["estado"] != "")]
             .groupby("estado")
             .size()
             .reset_index(name="quantidade")
-            .sort_values("quantidade", ascending=False)
+            .sort_values("quantidade", ascending=True)
         )
-
         if not estado_counts.empty:
-            st.bar_chart(
-                estado_counts.set_index("estado")["quantidade"],
-            )
+            st.bar_chart(estado_counts.set_index("estado")["quantidade"])
         else:
-            st.info("Nenhum estado encontrado a partir dos DDDs cadastrados.")
+            st.info("Nenhum estado encontrado.")
     else:
-        st.info("Nenhum estado encontrado a partir dos DDDs cadastrados.")
+        st.info("Nenhum estado encontrado.")
 
-    # Gráfico 1: número de contatos por dia da semana
-    st.markdown("---")
-    st.subheader("Contatos por dia da semana")
+    col_sexo, col_dia_semana = st.columns(2)
+    with col_sexo:
+        st.caption("Contatos por Sexo")
+        if "sexo" in leads_df.columns:
+            sexo_counts = leads_df["sexo"].value_counts()
+            if not sexo_counts.empty:
+                st.bar_chart(sexo_counts)
+            else:
+                st.info("Sem dados de sexo.")
+        else:
+            st.info("Coluna 'sexo' não encontrada.")
 
+    with col_dia_semana:
+        st.caption("Contatos por dia da semana")
+        if "data_contato" in leads_df.columns:
+            df_ok = leads_df.dropna(subset=["data_contato"]).copy()
+            if not df_ok.empty:
+                mapa_dias = {0: "Seg", 1: "Ter", 2: "Qua", 3: "Qui", 4: "Sex", 5: "Sáb", 6: "Dom"}
+                df_ok["dia_semana"] = df_ok["data_contato"].dt.dayofweek.map(mapa_dias)
+                ordem = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+                por_dia = (
+                    df_ok.groupby("dia_semana").size().reindex(ordem, fill_value=0).reset_index(name="quantidade")
+                )
+                st.bar_chart(por_dia.set_index("dia_semana")["quantidade"])
+            else:
+                st.info("Sem datas válidas.")
+        else:
+            st.info("Coluna 'data_contato' não encontrada.")
+
+    st.caption("Contatos por dia (ao longo do tempo)")
     if "data_contato" in leads_df.columns:
-        df_sem_data_nula = leads_df.dropna(subset=["data_contato"]).copy()
-        if not df_sem_data_nula.empty:
-            df_sem_data_nula["dia_semana_idx"] = df_sem_data_nula["data_contato"].dt.dayofweek
-            mapa_dias = {
-                0: "Seg",
-                1: "Ter",
-                2: "Qua",
-                3: "Qui",
-                4: "Sex",
-                5: "Sáb",
-                6: "Dom",
-            }
-            df_sem_data_nula["dia_semana"] = df_sem_data_nula["dia_semana_idx"].map(mapa_dias)
-            ordem = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
-            contatos_por_dia = (
-                df_sem_data_nula.groupby("dia_semana")
-                .size()
-                .reindex(ordem, fill_value=0)
-                .reset_index(name="quantidade")
-            )
-
-            st.bar_chart(
-                contatos_por_dia.set_index("dia_semana")["quantidade"],
-            )
+        df_por_data = leads_df.dropna(subset=["data_contato"]).copy()
+        df_por_data["_data"] = df_por_data["data_contato"].dt.strftime("%Y-%m-%d")
+        por_data = df_por_data.groupby("_data").size().reset_index(name="quantidade")
+        if not por_data.empty:
+            st.bar_chart(por_data.set_index("_data")["quantidade"])
         else:
-            st.info("Não há datas de contato válidas para calcular os dias da semana.")
-    else:
-        st.info("A coluna 'data_contato' não foi encontrada na base.")
+            st.info("Sem datas válidas para exibir.")
 
-    # Gráfico 2: motivos semanal e mensal
+    # ---------- 2. Por que não fecharam ----------
     st.markdown("---")
-    st.subheader("Motivos dos contatos - semanal x mensal")
+    st.subheader("2. Por que não fecharam")
 
-    col_motivo_semana, col_motivo_mes = st.columns(2)
+    if "motivo" in leads_df.columns:
+        por_motivo = leads_df["motivo"].value_counts().reset_index(name="quantidade")
+        por_motivo.columns = ["motivo", "quantidade"]
+        col_barras, col_pizza = st.columns(2)
+        with col_barras:
+            st.caption("Contatos por motivo (não fechou)")
+            if not por_motivo.empty:
+                st.bar_chart(por_motivo.set_index("motivo")["quantidade"])
+        with col_pizza:
+            st.caption("Proporção por motivo")
+            if not por_motivo.empty and alt is not None:
+                chart_pie = (
+                    alt.Chart(por_motivo)
+                    .mark_arc(innerRadius=0)
+                    .encode(
+                        theta=alt.Theta("quantidade:Q", stack=True),
+                        color=alt.Color("motivo:N", legend=alt.Legend(title="Motivo")),
+                    )
+                )
+                st.altair_chart(chart_pie, use_container_width=True)
+            elif not por_motivo.empty:
+                st.bar_chart(por_motivo.set_index("motivo")["quantidade"])
+    else:
+        st.info("Coluna 'motivo' não encontrada.")
 
-    with col_motivo_semana:
-        st.caption("Últimos 7 dias (semana atual)")
-        if "motivo" in contatos_semana.columns and not contatos_semana.empty:
-            motivos_semana = (
-                contatos_semana.groupby("motivo")
-                .size()
-                .reset_index(name="quantidade")
-                .sort_values("quantidade", ascending=False)
+    st.caption("Motivo de não fechamento por Estado")
+    if "estado" in leads_df.columns and "motivo" in leads_df.columns and alt is not None:
+        cross = pd.crosstab(leads_df["estado"], leads_df["motivo"]).reset_index()
+        cross_long = cross.melt(id_vars="estado", var_name="motivo", value_name="quantidade")
+        cross_long = cross_long[cross_long["quantidade"] > 0]
+        if not cross_long.empty:
+            chart_cross = (
+                alt.Chart(cross_long)
+                .mark_bar()
+                .encode(
+                    x=alt.X("estado:N", title="Estado"),
+                    y=alt.Y("quantidade:Q", title="Quantidade"),
+                    color=alt.Color("motivo:N", legend=alt.Legend(title="Motivo")),
+                )
             )
-            st.bar_chart(
-                motivos_semana.set_index("motivo")["quantidade"],
-            )
+            st.altair_chart(chart_cross, use_container_width=True)
         else:
-            st.info("Não há contatos na semana atual para agrupar por motivo.")
-
-    with col_motivo_mes:
-        st.caption("Mês atual")
-        if "motivo" in contatos_mes.columns and not contatos_mes.empty:
-            motivos_mes = (
-                contatos_mes.groupby("motivo")
-                .size()
-                .reset_index(name="quantidade")
-                .sort_values("quantidade", ascending=False)
-            )
-            st.bar_chart(
-                motivos_mes.set_index("motivo")["quantidade"],
-            )
+            st.info("Sem dados para motivo × estado.")
+    elif "estado" in leads_df.columns and "motivo" in leads_df.columns:
+        cross = pd.crosstab(leads_df["estado"], leads_df["motivo"])
+        if not cross.empty:
+            st.bar_chart(cross)
         else:
-            st.info("Não há contatos no mês atual para agrupar por motivo.")
+            st.info("Sem dados para motivo × estado.")
+
+    st.caption("Motivos ao longo do tempo")
+    if "data_contato" in leads_df.columns and "motivo" in leads_df.columns and alt is not None:
+        df_ok = leads_df.dropna(subset=["data_contato"]).copy()
+        df_ok["_data"] = df_ok["data_contato"].dt.strftime("%Y-%m-%d")
+        cross_t = pd.crosstab(df_ok["_data"], df_ok["motivo"]).reset_index()
+        cross_t_long = cross_t.melt(id_vars="_data", var_name="motivo", value_name="quantidade")
+        cross_t_long = cross_t_long[cross_t_long["quantidade"] > 0]
+        if not cross_t_long.empty:
+            chart_stacked = (
+                alt.Chart(cross_t_long)
+                .mark_bar()
+                .encode(
+                    x=alt.X("_data:O", title="Data"),
+                    y=alt.Y("quantidade:Q", title="Quantidade"),
+                    color=alt.Color("motivo:N", legend=alt.Legend(title="Motivo")),
+                )
+            )
+            st.altair_chart(chart_stacked, use_container_width=True)
+        else:
+            st.info("Sem dados para motivos ao longo do tempo.")
+    elif "data_contato" in leads_df.columns and "motivo" in leads_df.columns:
+        df_ok = leads_df.dropna(subset=["data_contato"]).copy()
+        df_ok["_data"] = df_ok["data_contato"].dt.strftime("%Y-%m-%d")
+        cross_t = pd.crosstab(df_ok["_data"], df_ok["motivo"])
+        if not cross_t.empty:
+            st.bar_chart(cross_t)
+        else:
+            st.info("Sem dados para motivos ao longo do tempo.")
+
+    # ---------- 3. Análise semanal e mensal ----------
+    st.markdown("---")
+    st.subheader("3. Análise semanal e mensal")
+
+    st.caption("Motivos: última semana vs mês atual")
+    col_s, col_m = st.columns(2)
+    with col_s:
+        st.write("**Últimos 7 dias**")
+        if not contatos_semana.empty and "motivo" in contatos_semana.columns:
+            ms = contatos_semana.groupby("motivo").size().reset_index(name="quantidade")
+            st.bar_chart(ms.set_index("motivo")["quantidade"])
+        else:
+            st.info("Sem contatos na semana.")
+    with col_m:
+        st.write("**Mês atual**")
+        if not contatos_mes.empty and "motivo" in contatos_mes.columns:
+            mm = contatos_mes.groupby("motivo").size().reset_index(name="quantidade")
+            st.bar_chart(mm.set_index("motivo")["quantidade"])
+        else:
+            st.info("Sem contatos no mês.")
+
+    st.caption("Público por Estado: semana vs mês")
+    col_est_s, col_est_m = st.columns(2)
+    with col_est_s:
+        st.write("**Últimos 7 dias**")
+        if not contatos_semana.empty and "estado" in contatos_semana.columns:
+            es = (
+                contatos_semana[contatos_semana["estado"].notna() & (contatos_semana["estado"] != "")]
+                .groupby("estado")
+                .size()
+                .sort_values(ascending=True)
+                .reset_index(name="quantidade")
+            )
+            if not es.empty:
+                st.bar_chart(es.set_index("estado")["quantidade"])
+            else:
+                st.info("Sem estados na semana.")
+        else:
+            st.info("Sem contatos na semana.")
+    with col_est_m:
+        st.write("**Mês atual**")
+        if not contatos_mes.empty and "estado" in contatos_mes.columns:
+            em = (
+                contatos_mes[contatos_mes["estado"].notna() & (contatos_mes["estado"] != "")]
+                .groupby("estado")
+                .size()
+                .sort_values(ascending=True)
+                .reset_index(name="quantidade")
+            )
+            if not em.empty:
+                st.bar_chart(em.set_index("estado")["quantidade"])
+            else:
+                st.info("Sem estados no mês.")
+        else:
+            st.info("Sem contatos no mês.")
+
+    st.caption("Evolução mês a mês")
+    if "data_contato" in leads_df.columns:
+        leads_df["_mes"] = leads_df["data_contato"].dt.to_period("M").astype(str)
+        por_mes = leads_df.groupby("_mes").size().reset_index(name="quantidade")
+        if not por_mes.empty:
+            st.bar_chart(por_mes.set_index("_mes")["quantidade"])
+        else:
+            st.info("Sem dados por mês.")
+
+    st.caption("Motivos por mês (empilhado)")
+    if "data_contato" in leads_df.columns and "motivo" in leads_df.columns and alt is not None:
+        df_m = leads_df.dropna(subset=["data_contato", "motivo"]).copy()
+        df_m["_mes"] = df_m["data_contato"].dt.to_period("M").astype(str)
+        cross_mes = pd.crosstab(df_m["_mes"], df_m["motivo"]).reset_index()
+        cross_mes_long = cross_mes.melt(id_vars="_mes", var_name="motivo", value_name="quantidade")
+        cross_mes_long = cross_mes_long[cross_mes_long["quantidade"] > 0]
+        if not cross_mes_long.empty:
+            chart_mes = (
+                alt.Chart(cross_mes_long)
+                .mark_bar()
+                .encode(
+                    x=alt.X("_mes:O", title="Mês"),
+                    y=alt.Y("quantidade:Q", title="Quantidade"),
+                    color=alt.Color("motivo:N", legend=alt.Legend(title="Motivo")),
+                )
+            )
+            st.altair_chart(chart_mes, use_container_width=True)
+        else:
+            st.info("Sem dados para motivos por mês.")
+    elif "data_contato" in leads_df.columns and "motivo" in leads_df.columns:
+        leads_df["_mes"] = leads_df["data_contato"].dt.to_period("M").astype(str)
+        cross_mes = pd.crosstab(leads_df["_mes"], leads_df["motivo"])
+        if not cross_mes.empty:
+            st.bar_chart(cross_mes)
+        else:
+            st.info("Sem dados para motivos por mês.")
 
 
 # Tela 2: formulário para cadastrar novos contatos recebidos via WhatsApp
@@ -294,12 +446,13 @@ def tela_edicao():
     data_contato_original = registro.get("data_contato", "")
     data_ultima_atualizacao_original = registro.get("data_ultima_atualizacao", "")
 
-    # Converter datas de string para date para exibir no form
+    # Coluna de data no formato YYYY-mm-dd: converter para date e exibir no form
     def _parse_data(valor_str):
         try:
             if pd.isna(valor_str) or valor_str == "":
                 return None
-            return pd.to_datetime(valor_str).date()
+            dt = pd.to_datetime(valor_str, format="%Y-%m-%d", errors="coerce")
+            return dt.date() if pd.notna(dt) else None
         except Exception:
             return None
 
