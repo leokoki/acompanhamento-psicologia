@@ -9,6 +9,9 @@ try:
 except ImportError:
     alt = None
 
+# Ordem e cores fixas por motivo (mesma cor em todos os gráficos de motivos)
+MOTIVOS_ORDEM = ["Aguardando", "Não retornou", "Preço", "Público Errado", "Convênio"]
+CORES_MOTIVOS = ["#4472C4", "#ED7D31", "#70AD47", "#FFC000", "#5B9BD5"]
 
 # Mapeamento de DDD para estado (UF) usado para preencher o campo de estado automaticamente
 DDD_TO_ESTADO = {
@@ -107,6 +110,7 @@ def tela_dashboards():
     hoje = pd.Timestamp.today().normalize()
     inicio_semana = hoje - pd.Timedelta(days=6)
     inicio_mes = hoje.replace(day=1)
+    inicio_40d = hoje - pd.Timedelta(days=39)  # últimos 40 dias para gráficos diários
     leads_df["_data_norm"] = leads_df["data_contato"].dt.normalize()
     contatos_semana = leads_df[leads_df["_data_norm"] >= inicio_semana]
     contatos_mes = leads_df[leads_df["_data_norm"] >= inicio_mes]
@@ -135,7 +139,37 @@ def tela_dashboards():
             .sort_values("quantidade", ascending=True)
         )
         if not estado_counts.empty:
-            st.bar_chart(estado_counts.set_index("estado")["quantidade"])
+            if alt is not None:
+                bars_estado = (
+                    alt.Chart(estado_counts)
+                    .mark_bar()
+                    .encode(
+                        x=alt.X(
+                            "estado:N",
+                            title="Estado",
+                            sort=sorted(estado_counts["estado"].tolist()),
+                            axis=alt.Axis(labelAngle=-60),
+                        ),
+                        y=alt.Y("quantidade:Q", title="Quantidade"),
+                    )
+                )
+                text_estado = (
+                    alt.Chart(estado_counts)
+                    .transform_calculate(mid="datum.quantidade/2")
+                    .mark_text(align="center", baseline="middle", fontSize=11)
+                    .encode(
+                        x=alt.X(
+                            "estado:N",
+                            sort=sorted(estado_counts["estado"].tolist()),
+                            title=alt.Undefined,
+                        ),
+                        y=alt.Y("mid:Q", title=alt.Undefined),
+                        text=alt.Text("quantidade:Q", format="d"),
+                    )
+                )
+                st.altair_chart(bars_estado + text_estado, use_container_width=True)
+            else:
+                st.bar_chart(estado_counts.set_index("estado")["quantidade"])
         else:
             st.info("Nenhum estado encontrado.")
     else:
@@ -160,11 +194,37 @@ def tela_dashboards():
             if not df_ok.empty:
                 mapa_dias = {0: "Seg", 1: "Ter", 2: "Qua", 3: "Qui", 4: "Sex", 5: "Sáb", 6: "Dom"}
                 df_ok["dia_semana"] = df_ok["data_contato"].dt.dayofweek.map(mapa_dias)
-                ordem = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+                ordem_dias = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
                 por_dia = (
-                    df_ok.groupby("dia_semana").size().reindex(ordem, fill_value=0).reset_index(name="quantidade")
+                    df_ok.groupby("dia_semana").size().reindex(ordem_dias, fill_value=0).reset_index(name="quantidade")
                 )
-                st.bar_chart(por_dia.set_index("dia_semana")["quantidade"])
+                if alt is not None:
+                    bars_dia = (
+                        alt.Chart(por_dia)
+                        .mark_bar()
+                        .encode(
+                            x=alt.X(
+                                "dia_semana:N",
+                                title="Dia da semana",
+                                sort=ordem_dias,
+                                axis=alt.Axis(labelAngle=-60),
+                            ),
+                            y=alt.Y("quantidade:Q", title="Quantidade"),
+                        )
+                    )
+                    text_dia = (
+                        alt.Chart(por_dia)
+                        .transform_calculate(mid="datum.quantidade/2")
+                        .mark_text(align="center", baseline="middle", fontSize=11)
+                        .encode(
+                            x=alt.X("dia_semana:N", sort=ordem_dias, title=alt.Undefined),
+                            y=alt.Y("mid:Q", title=alt.Undefined),
+                            text=alt.Text("quantidade:Q", format="d"),
+                        )
+                    )
+                    st.altair_chart(bars_dia + text_dia, use_container_width=True)
+                else:
+                    st.bar_chart(por_dia.set_index("dia_semana")["quantidade"])
             else:
                 st.info("Sem datas válidas.")
         else:
@@ -176,7 +236,36 @@ def tela_dashboards():
         df_por_data["_data"] = df_por_data["data_contato"].dt.strftime("%Y-%m-%d")
         por_data = df_por_data.groupby("_data").size().reset_index(name="quantidade")
         if not por_data.empty:
-            st.bar_chart(por_data.set_index("_data")["quantidade"])
+            # Últimos 40 dias, incluindo dias com zero contatos
+            todas_datas = pd.date_range(start=inicio_40d, end=hoje, freq="D")
+            todas_datas_str = [d.strftime("%Y-%m-%d") for d in todas_datas]
+            por_data = (
+                por_data.set_index("_data")
+                .reindex(todas_datas_str, fill_value=0)
+                .reset_index()
+            )
+            if alt is not None:
+                bars_por_data = (
+                    alt.Chart(por_data)
+                    .mark_bar()
+                    .encode(
+                        x=alt.X("_data:O", title="Data"),
+                        y=alt.Y("quantidade:Q", title="Quantidade"),
+                    )
+                )
+                text_por_data = (
+                    alt.Chart(por_data)
+                    .transform_calculate(mid="datum.quantidade/2")
+                    .mark_text(align="center", baseline="middle", fontSize=10)
+                    .encode(
+                        x=alt.X("_data:O", title=alt.Undefined),
+                        y=alt.Y("mid:Q", title=alt.Undefined),
+                        text=alt.Text("quantidade:Q", format="d"),
+                    )
+                )
+                st.altair_chart(bars_por_data + text_por_data, use_container_width=True)
+            else:
+                st.bar_chart(por_data.set_index("_data")["quantidade"])
         else:
             st.info("Sem datas válidas para exibir.")
 
@@ -200,7 +289,11 @@ def tela_dashboards():
                     .mark_arc(innerRadius=0)
                     .encode(
                         theta=alt.Theta("quantidade:Q", stack=True),
-                        color=alt.Color("motivo:N", legend=alt.Legend(title="Motivo")),
+                        color=alt.Color(
+                            "motivo:N",
+                            scale=alt.Scale(domain=MOTIVOS_ORDEM, range=CORES_MOTIVOS),
+                            legend=alt.Legend(title="Motivo"),
+                        ),
                     )
                 )
                 st.altair_chart(chart_pie, use_container_width=True)
@@ -219,9 +312,13 @@ def tela_dashboards():
                 alt.Chart(cross_long)
                 .mark_bar()
                 .encode(
-                    x=alt.X("estado:N", title="Estado"),
+                    x=alt.X("estado:N", title="Estado", axis=alt.Axis(labelAngle=-60)),
                     y=alt.Y("quantidade:Q", title="Quantidade"),
-                    color=alt.Color("motivo:N", legend=alt.Legend(title="Motivo")),
+                    color=alt.Color(
+                        "motivo:N",
+                        scale=alt.Scale(domain=MOTIVOS_ORDEM, range=CORES_MOTIVOS),
+                        legend=alt.Legend(title="Motivo"),
+                    ),
                 )
             )
             st.altair_chart(chart_cross, use_container_width=True)
@@ -237,6 +334,7 @@ def tela_dashboards():
     st.caption("Motivos ao longo do tempo")
     if "data_contato" in leads_df.columns and "motivo" in leads_df.columns and alt is not None:
         df_ok = leads_df.dropna(subset=["data_contato"]).copy()
+        df_ok = df_ok[df_ok["data_contato"].dt.normalize() >= inicio_40d]
         df_ok["_data"] = df_ok["data_contato"].dt.strftime("%Y-%m-%d")
         cross_t = pd.crosstab(df_ok["_data"], df_ok["motivo"]).reset_index()
         cross_t_long = cross_t.melt(id_vars="_data", var_name="motivo", value_name="quantidade")
@@ -248,7 +346,11 @@ def tela_dashboards():
                 .encode(
                     x=alt.X("_data:O", title="Data"),
                     y=alt.Y("quantidade:Q", title="Quantidade"),
-                    color=alt.Color("motivo:N", legend=alt.Legend(title="Motivo")),
+                    color=alt.Color(
+                        "motivo:N",
+                        scale=alt.Scale(domain=MOTIVOS_ORDEM, range=CORES_MOTIVOS),
+                        legend=alt.Legend(title="Motivo"),
+                    ),
                 )
             )
             st.altair_chart(chart_stacked, use_container_width=True)
@@ -256,6 +358,7 @@ def tela_dashboards():
             st.info("Sem dados para motivos ao longo do tempo.")
     elif "data_contato" in leads_df.columns and "motivo" in leads_df.columns:
         df_ok = leads_df.dropna(subset=["data_contato"]).copy()
+        df_ok = df_ok[df_ok["data_contato"].dt.normalize() >= inicio_40d]
         df_ok["_data"] = df_ok["data_contato"].dt.strftime("%Y-%m-%d")
         cross_t = pd.crosstab(df_ok["_data"], df_ok["motivo"])
         if not cross_t.empty:
@@ -297,7 +400,33 @@ def tela_dashboards():
                 .reset_index(name="quantidade")
             )
             if not es.empty:
-                st.bar_chart(es.set_index("estado")["quantidade"])
+                if alt is not None:
+                    bars_es = (
+                        alt.Chart(es)
+                        .mark_bar()
+                        .encode(
+                            x=alt.X(
+                                "estado:N",
+                                title="Estado",
+                                sort=es["estado"].tolist(),
+                                axis=alt.Axis(labelAngle=-60),
+                            ),
+                            y=alt.Y("quantidade:Q", title="Quantidade"),
+                        )
+                    )
+                    text_es = (
+                        alt.Chart(es)
+                        .transform_calculate(mid="datum.quantidade/2")
+                        .mark_text(align="center", baseline="middle", fontSize=11)
+                        .encode(
+                            x=alt.X("estado:N", sort=es["estado"].tolist(), title=alt.Undefined),
+                            y=alt.Y("mid:Q", title=alt.Undefined),
+                            text=alt.Text("quantidade:Q", format="d"),
+                        )
+                    )
+                    st.altair_chart(bars_es + text_es, use_container_width=True)
+                else:
+                    st.bar_chart(es.set_index("estado")["quantidade"])
             else:
                 st.info("Sem estados na semana.")
         else:
@@ -313,7 +442,33 @@ def tela_dashboards():
                 .reset_index(name="quantidade")
             )
             if not em.empty:
-                st.bar_chart(em.set_index("estado")["quantidade"])
+                if alt is not None:
+                    bars_em = (
+                        alt.Chart(em)
+                        .mark_bar()
+                        .encode(
+                            x=alt.X(
+                                "estado:N",
+                                title="Estado",
+                                sort=em["estado"].tolist(),
+                                axis=alt.Axis(labelAngle=-60),
+                            ),
+                            y=alt.Y("quantidade:Q", title="Quantidade"),
+                        )
+                    )
+                    text_em = (
+                        alt.Chart(em)
+                        .transform_calculate(mid="datum.quantidade/2")
+                        .mark_text(align="center", baseline="middle", fontSize=11)
+                        .encode(
+                            x=alt.X("estado:N", sort=em["estado"].tolist(), title=alt.Undefined),
+                            y=alt.Y("mid:Q", title=alt.Undefined),
+                            text=alt.Text("quantidade:Q", format="d"),
+                        )
+                    )
+                    st.altair_chart(bars_em + text_em, use_container_width=True)
+                else:
+                    st.bar_chart(em.set_index("estado")["quantidade"])
             else:
                 st.info("Sem estados no mês.")
         else:
@@ -321,37 +476,68 @@ def tela_dashboards():
 
     st.caption("Evolução mês a mês")
     if "data_contato" in leads_df.columns:
-        leads_df["_mes"] = leads_df["data_contato"].dt.to_period("M").astype(str)
+        leads_df["_mes"] = leads_df["data_contato"].dt.strftime("%Y-%b").str.lower()
         por_mes = leads_df.groupby("_mes").size().reset_index(name="quantidade")
         if not por_mes.empty:
-            st.bar_chart(por_mes.set_index("_mes")["quantidade"])
+            mes_ordem = leads_df.groupby("_mes")["data_contato"].min().reset_index()
+            mes_ordem.columns = ["_mes", "_ordem"]
+            por_mes = por_mes.merge(mes_ordem, on="_mes").sort_values("_ordem").drop(columns=["_ordem"])
+            if alt is not None:
+                bars_evol_mes = (
+                    alt.Chart(por_mes)
+                    .mark_bar()
+                    .encode(
+                        x=alt.X("_mes:O", title="Mês", sort=por_mes["_mes"].tolist(), axis=alt.Axis(labelAngle=-60)),
+                        y=alt.Y("quantidade:Q", title="Quantidade"),
+                    )
+                )
+                text_evol_mes = (
+                    alt.Chart(por_mes)
+                    .transform_calculate(mid="datum.quantidade/2")
+                    .mark_text(align="center", baseline="middle", fontSize=11)
+                    .encode(
+                        x=alt.X("_mes:O", sort=por_mes["_mes"].tolist(), title=alt.Undefined),
+                        y=alt.Y("mid:Q", title=alt.Undefined),
+                        text=alt.Text("quantidade:Q", format="d"),
+                    )
+                )
+                st.altair_chart(bars_evol_mes + text_evol_mes, use_container_width=True)
+            else:
+                st.bar_chart(por_mes.set_index("_mes")["quantidade"])
         else:
             st.info("Sem dados por mês.")
 
     st.caption("Motivos por mês (empilhado)")
     if "data_contato" in leads_df.columns and "motivo" in leads_df.columns and alt is not None:
         df_m = leads_df.dropna(subset=["data_contato", "motivo"]).copy()
-        df_m["_mes"] = df_m["data_contato"].dt.to_period("M").astype(str)
+        df_m["_mes"] = df_m["data_contato"].dt.strftime("%Y-%b").str.lower()
         cross_mes = pd.crosstab(df_m["_mes"], df_m["motivo"]).reset_index()
         cross_mes_long = cross_mes.melt(id_vars="_mes", var_name="motivo", value_name="quantidade")
         cross_mes_long = cross_mes_long[cross_mes_long["quantidade"] > 0]
         if not cross_mes_long.empty:
+            ordem_meses = df_m.groupby("_mes")["data_contato"].min().sort_values().index.tolist()
             chart_mes = (
                 alt.Chart(cross_mes_long)
                 .mark_bar()
                 .encode(
-                    x=alt.X("_mes:O", title="Mês"),
+                    x=alt.X("_mes:O", title="Mês", sort=ordem_meses, axis=alt.Axis(labelAngle=-60)),
                     y=alt.Y("quantidade:Q", title="Quantidade"),
-                    color=alt.Color("motivo:N", legend=alt.Legend(title="Motivo")),
+                    color=alt.Color(
+                        "motivo:N",
+                        scale=alt.Scale(domain=MOTIVOS_ORDEM, range=CORES_MOTIVOS),
+                        legend=alt.Legend(title="Motivo"),
+                    ),
                 )
             )
             st.altair_chart(chart_mes, use_container_width=True)
         else:
             st.info("Sem dados para motivos por mês.")
     elif "data_contato" in leads_df.columns and "motivo" in leads_df.columns:
-        leads_df["_mes"] = leads_df["data_contato"].dt.to_period("M").astype(str)
+        leads_df["_mes"] = leads_df["data_contato"].dt.strftime("%Y-%b").str.lower()
         cross_mes = pd.crosstab(leads_df["_mes"], leads_df["motivo"])
         if not cross_mes.empty:
+            ordem_mes_fallback = leads_df.groupby("_mes")["data_contato"].min().sort_values().index.tolist()
+            cross_mes = cross_mes.reindex(ordem_mes_fallback)
             st.bar_chart(cross_mes)
         else:
             st.info("Sem dados para motivos por mês.")
